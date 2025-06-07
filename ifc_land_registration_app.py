@@ -157,7 +157,7 @@ if uploaded_file:
 
         # Beneficiar
         if beneficiar_nume.strip():
-            create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type=="Organizație"))
+            create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type=="Persoană juridică"))
 
         # Înregistrare teren
         update_single_value(model, site, "PSet_LandRegistration", "LandTitleID", land_title_id)
