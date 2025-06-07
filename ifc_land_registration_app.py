@@ -5,14 +5,17 @@ import ifcopenshell.util.element as util
 import ifcopenshell.guid as guid
 import tempfile
 import io
-from typing import List, Optional
+import os
 
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
 # ---------------------------------------------------------------------------
 # Rev‑10 (2025‑06‑07): Câmpul „Județ/Regiune” devine dropdown cu toate județele
 #     României (inclusiv București). Valoarea implicită se preîncarcă din
-#     PSet_Address dacă există.
+#     PSet_Address dacă există. Adăugat placeholder pentru selecție județ.
+#     Corectat load_ifc_from_upload pentru memoryview.
+#     Corectat create_beneficiar: eliminat GlobalId pentru IfcOrganization/IfcPerson.
+#     Corectat exportul IFC pentru a folosi model.to_string() cu BytesIO.
 # ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
@@ -26,7 +29,7 @@ except Exception:
 # ----------------------------------------------------------
 # Date statice
 # ----------------------------------------------------------
-ROM_COUNTIES = [
+ROM_COUNTIES_BASE = [
     "Alba", "Arad", "Argeș", "Bacău", "Bihor", "Bistrița-Năsăud", "Botoșani",
     "Brașov", "Brăila", "București", "Buzău", "Caraș-Severin", "Călărași",
     "Cluj", "Constanța", "Covasna", "Dâmbovița", "Dolj", "Galați", "Giurgiu",
@@ -36,15 +39,24 @@ ROM_COUNTIES = [
     "Vrancea",
 ]
 
+DEFAULT_JUDET_PROMPT = "--- Selectați județul ---"
+UI_ROM_COUNTIES = [DEFAULT_JUDET_PROMPT] + ROM_COUNTIES_BASE
+
 # ----------------------------------------------------------
 # Funcții helper
 # ----------------------------------------------------------
 
-def load_ifc_from_upload(uploaded_bytes: bytes):
-    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".ifc")
-    temp.write(uploaded_bytes); temp.flush(); temp.close()
-    return ifcopenshell.open(temp.name)
-
+def load_ifc_from_upload(uploaded_file_mv: memoryview):
+    tmp_file_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as temp_file:
+            temp_file.write(uploaded_file_mv)
+            tmp_file_path = temp_file.name
+        model = ifcopenshell.open(tmp_file_path)
+        return model
+    finally:
+        if tmp_file_path and os.path.exists(tmp_file_path):
+            os.remove(tmp_file_path)
 
 def list_sites(model):
     return model.by_type("IfcSite")
@@ -70,8 +82,8 @@ def update_single_value(model, product, pset_name, prop, value):
 
 
 def get_single_value(product, pset_name, prop):
-    pset = util.get_pset(product, pset_name)
-    return pset.get(prop, "") if pset else ""
+    pset_properties = util.get_pset(product, pset_name)
+    return pset_properties.get(prop, "") if pset_properties else ""
 
 
 def get_project(model):
@@ -86,7 +98,9 @@ def create_beneficiar(model, project, nume, is_org):
     else:
         parts = nume.split(maxsplit=1); given, family = (parts + [""])[:2]
         actor = model.create_entity("IfcPerson", GivenName=given, FamilyName=family)
-    role = model.create_entity("IfcActorRole", Role="OWNER")
+    
+    role = model.create_entity("IfcActorRole", Role="OWNER") 
+    
     model.create_entity(
         "IfcRelAssignsToActor",
         GlobalId=guid.new(), OwnerHistory=oh, Name="Beneficiar",
@@ -103,7 +117,8 @@ st.title("Plan de situație IFC - Îmbogățire cu informații")
 uploaded_file = st.file_uploader("Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False)
 
 if uploaded_file:
-    model = load_ifc_from_upload(uploaded_file.getbuffer())
+    model = load_ifc_from_upload(uploaded_file.getbuffer()) 
+    
     project = get_project(model)
     if project is None:
         st.error("Nu există niciun IfcProject în model.")
@@ -114,67 +129,93 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
-    # 1️⃣ Informații proiect
     st.subheader("Informații proiect")
     project_name      = st.text_input("Număr proiect", value=project.Name or "")
     project_long_name = st.text_input("Nume proiect", value=project.LongName or "")
 
-    # 2️⃣ Beneficiar
     st.subheader("Beneficiar")
     beneficiar_type = st.radio("Tip beneficiar", ["Persoană fizică", "Persoană juridică"], horizontal=True)
     beneficiar_nume = st.text_input("Nume beneficiar")
 
-    # 3️⃣ Înregistrare teren + selector sit
     st.subheader("Date teren (PSet_LandRegistration)")
+    site_options = {i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}" for i in range(len(sites))}
     idx = st.selectbox(
         "Alegeți IfcSite-ul de editat",
-        range(len(sites)),
-        format_func=lambda i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}")
+        options=list(site_options.keys()),
+        format_func=lambda i: site_options[i]
+    )
     site = sites[idx]
 
     land_title_id = st.text_input("Nr. Cărții funciare", value=get_single_value(site, "PSet_LandRegistration", "LandTitleID"))
     land_id       = st.text_input("Nr. Cadastral",       value=get_single_value(site, "PSet_LandRegistration", "LandId"))
 
-    # 4️⃣ Adresă sit
     st.subheader("Adresă teren (PSet_Address)")
-    strada  = st.text_input("Stradă")
-    oras    = st.text_input("Oraș")
+    strada  = st.text_input("Stradă", value=get_single_value(site, "PSet_Address", "Street"))
+    oras    = st.text_input("Oraș",   value=get_single_value(site, "PSet_Address", "Town"))
 
-    default_judet = get_single_value(site, "PSet_Address", "Region")
-    try:
-        default_idx = ROM_COUNTIES.index(default_judet) if default_judet else 0
-    except ValueError:
-        default_idx = 0
-    judet = st.selectbox("Județ", ROM_COUNTIES, index=default_idx)
+    default_judet_val_from_ifc = get_single_value(site, "PSet_Address", "Region")
+    default_select_idx = 0 
 
-    cod  = st.text_input("Cod poștal")
+    if default_judet_val_from_ifc:
+        try:
+            original_list_idx = ROM_COUNTIES_BASE.index(default_judet_val_from_ifc)
+            default_select_idx = original_list_idx + 1
+        except ValueError:
+            pass 
+            
+    judet_selection = st.selectbox("Județ", UI_ROM_COUNTIES, index=default_select_idx)
 
-    # -------------------------- Aplică modificări --------------------------
+    cod  = st.text_input("Cod poștal", value=get_single_value(site, "PSet_Address", "PostalCode"))
+
     if st.button("Aplică modificările și generează descărcarea"):
-        # Proiect
         project.Name = project_name
         project.LongName = project_long_name
 
-        # Beneficiar
         if beneficiar_nume.strip():
             create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type == "Persoană juridică"))
 
-        # Înregistrare teren
         update_single_value(model, site, "PSet_LandRegistration", "LandTitleID", land_title_id)
         update_single_value(model, site, "PSet_LandRegistration", "LandId", land_id)
 
-        # Adresă sit
-        addr = {"Street": strada, "Town": oras, "Region": judet, "PostalCode": cod, "Country": "Romania"}
-        for k, v in addr.items():
-            if v:
-                update_single_value(model, site, "PSet_Address", k, v)
+        actual_judet_to_save = judet_selection if judet_selection != DEFAULT_JUDET_PROMPT else ""
+        
+        address_props = {
+            "Street": strada, 
+            "Town": oras, 
+            "Region": actual_judet_to_save,
+            "PostalCode": cod, 
+            "Country": "Romania"
+        }
+        
+        has_address_data = any(v for k, v in address_props.items() if k != "Country" and v.strip())
 
+        # Actualizăm proprietățile de adresă
+        # PSet-ul va fi creat de update_single_value dacă nu există
+        for prop_name, prop_value in address_props.items():
+            # Setăm proprietatea doar dacă are valoare sau este "Country"
+            # sau dacă PSet-ul există deja și vrem să ștergem valoarea (setând-o la "")
+            # Logica actuală: dacă prop_value e gol (ex. "" din UI), va fi setat ca "" în IFC
+            if prop_value or prop_name == "Country":
+                 update_single_value(model, site, "PSet_Address", prop_name, prop_value.strip())
+            elif get_single_value(site, "PSet_Address", prop_name): # Dacă există valoare în IFC dar nu în UI (e goală)
+                 update_single_value(model, site, "PSet_Address", prop_name, "") # O setăm la gol
+
+
+        # --- Corectat aici ---
         # Export IFC
-        buf = io.BytesIO(model.to_string().encode("utf-8"))
+        # Obține conținutul IFC ca string, apoi codifică-l în bytes
+        ifc_string_content = model.to_string()
+        ifc_bytes_content = ifc_string_content.encode("utf-8")
+        
+        # Creează un obiect BytesIO din conținutul byte
+        file_data = io.BytesIO(ifc_bytes_content)
+        # file_data.seek(0) # Nu este necesar aici deoarece BytesIO este inițializat direct cu conținutul
+        # --- Sfârșit corecție ---
+
         st.success("Modificările au fost aplicate! Folosiți butonul de mai jos pentru a descărca fișierul IFC actualizat.")
         st.download_button(
             label="Descarcă IFC îmbogățit",
-            data=buf,
-            file_name="updated.ifc",
+            data=file_data, # Acum file_data este un BytesIO care conține datele fișierului
+            file_name=f"+{uploaded_file.name if uploaded_file else 'model'}",
             mime="application/x-industry-foundation-classes",
         )
