@@ -98,7 +98,7 @@ def create_beneficiar(model, project, nume, is_org):
 # UI
 # ----------------------------------------------------------
 
-st.title("Plan de situație IFC - Îmbogățire cu informții")
+st.title("Plan de situație IFC - Îmbogățire cu informații")
 
 uploaded_file = st.file_uploader("Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False)
 
@@ -121,13 +121,13 @@ if uploaded_file:
 
     # 2️⃣ Beneficiar
     st.subheader("Beneficiar")
-    beneficiar_type = st.radio("Tip beneficiar", ["Persoană fizică", "Organizație"], horizontal=True)
+    beneficiar_type = st.radio("Tip beneficiar", ["Persoană fizică", "Persoană juridică"], horizontal=True)
     beneficiar_nume = st.text_input("Nume beneficiar")
 
     # 3️⃣ Înregistrare teren + selector sit
     st.subheader("Date teren (PSet_LandRegistration)")
     idx = st.selectbox(
-        "Alegeți situl de editat",
+        "Alegeți IfcSite-ul de editat",
         range(len(sites)),
         format_func=lambda i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}")
     site = sites[idx]
