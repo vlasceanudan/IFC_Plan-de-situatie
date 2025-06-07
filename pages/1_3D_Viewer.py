@@ -13,7 +13,7 @@ if uploaded_file is not None:
     viewer_html = f"""
     <div id='viewer-container' style='width: 100%; height: 750px;'></div>
     <script type='module'>
-      import {{ IfcViewerAPI }} from 'https://cdn.jsdelivr.net/npm/web-ifc-viewer@latest/dist/ifc-viewer-api.js';
+      import {{ IfcViewerAPI }} from 'https://unpkg.com/web-ifc-viewer@latest/dist/ifc-viewer-api.js?module';
       const container = document.getElementById('viewer-container');
       const viewer = new IfcViewerAPI({{ container }});
       viewer.grid.setGrid();
