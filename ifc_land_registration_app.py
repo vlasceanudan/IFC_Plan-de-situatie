@@ -100,7 +100,7 @@ def create_beneficiar(model, project, nume, is_org):
 
 st.title("Plan de situație IFC")
 
-uploaded_file = st.file_uploader("Încarcă un fișier IFC4X3", type=["ifc"], accept_multiple_files=False)
+uploaded_file = st.file_uploader("Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False)
 
 if uploaded_file:
     model = load_ifc_from_upload(uploaded_file.getbuffer())
