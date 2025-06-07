@@ -1,0 +1,2 @@
+streamlit>=1.34
+ifcopenshell==0.8.0          # pre-built wheels for Py 3.9-3.12
