@@ -98,7 +98,7 @@ def create_beneficiar(model, project, nume, is_org):
 # UI
 # ----------------------------------------------------------
 
-st.title("Plan de situație IFC")
+st.title("Plan de situație IFC - Îmbogățire cu informții")
 
 uploaded_file = st.file_uploader("Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False)
 
@@ -125,7 +125,7 @@ if uploaded_file:
     beneficiar_nume = st.text_input("Nume beneficiar")
 
     # 3️⃣ Înregistrare teren + selector sit
-    st.subheader("Înregistrare teren (PSet_LandRegistration)")
+    st.subheader("Date teren (PSet_LandRegistration)")
     idx = st.selectbox(
         "Alegeți situl de editat",
         range(len(sites)),
@@ -173,7 +173,7 @@ if uploaded_file:
         buf = io.BytesIO(model.to_string().encode("utf-8"))
         st.success("Modificările au fost aplicate! Folosiți butonul de mai jos pentru a descărca fișierul IFC actualizat.")
         st.download_button(
-            label="Descarcă IFC actualizat",
+            label="Descarcă IFC îmbogățit",
             data=buf,
             file_name="updated.ifc",
             mime="application/x-industry-foundation-classes",
