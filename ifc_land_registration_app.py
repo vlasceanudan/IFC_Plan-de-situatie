@@ -116,8 +116,8 @@ if uploaded_file:
 
     # 1️⃣ Informații proiect
     st.subheader("Informații proiect")
-    project_name      = st.text_input("Nume proiect", value=project.Name or "")
-    project_long_name = st.text_input("Nume lung proiect", value=project.LongName or "")
+    project_name      = st.text_input("Număr proiect", value=project.Name or "")
+    project_long_name = st.text_input("Nume proiect", value=project.LongName or "")
 
     # 2️⃣ Beneficiar
     st.subheader("Beneficiar")
