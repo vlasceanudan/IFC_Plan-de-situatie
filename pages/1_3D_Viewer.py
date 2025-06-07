@@ -15,7 +15,7 @@ if uploaded_file is not None:
     <script type='module'>
       import {{ IfcViewerAPI }} from 'https://cdn.jsdelivr.net/npm/web-ifc-viewer@latest/dist/ifc-viewer-api.js';
       const container = document.getElementById('viewer-container');
-      const viewer = new IfcViewerAPI({ container });
+      const viewer = new IfcViewerAPI({{ container }});
       viewer.grid.setGrid();
       viewer.axes.setAxes();
       const binaryString = atob('{b64_ifc}');
