@@ -7,8 +7,6 @@ import tempfile
 import io
 import os
 import base64
-import re
-from urllib.parse import urlsplit
 
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
@@ -22,45 +20,6 @@ from urllib.parse import urlsplit
 #     Corectat exportul IFC pentru a folosi model.to_string() cu BytesIO.
 # ---------------------------------------------------------------------------
 
-THREE_VERSION = "0.160.1"
-
-_THREE_RE = re.compile(r'(["\'])(/three[^"\']*)\1')
-
-
-def _rewrite_imports(src: str) -> str:
-    """Rewrite Three.js imports to use esm.sh with explicit version."""
-
-    def repl(match: re.Match) -> str:
-        quote = match.group(1)
-        url = match.group(2)
-        parts = urlsplit(url)
-        path = parts.path
-        query = f"?{parts.query}" if parts.query else ""
-
-        after = path[len("/three") :]
-        version_spec = ""
-        subpath = ""
-        if after.startswith("@"):  # e.g. /three@^0.160/examples...
-            after = after[1:]
-            if "/" in after:
-                version_spec, subpath = after.split("/", 1)
-                subpath = "/" + subpath
-            else:
-                version_spec = after
-        else:
-            subpath = after
-
-        if version_spec:
-            if version_spec.startswith((">=", "^", "~")):
-                version = THREE_VERSION
-            else:
-                version = re.sub(r"^[^0-9]*", "", version_spec)
-        else:
-            version = THREE_VERSION
-
-        return f"{quote}https://esm.sh/three@{version}{subpath}{query}{quote}"
-
-    return _THREE_RE.sub(repl, src)
 
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
 
@@ -191,37 +150,35 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
-    if uploaded_file:
-        b64_ifc = base64.b64encode(uploaded_file.getvalue()).decode()
-        viewer_html = f"""
-        <div id='viewer-container' style='width: 100%; height: 600px;'></div>
-        <script>
-            // Prevent libraries from thinking we run in Node
-            window.process = {{ versions: {{}} }};
-        </script>
-        <script type='module'>
-            import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle&deps=three@0.160.1,bim-fragment@1.5.0';
+    b64_ifc = base64.b64encode(uploaded_file.getvalue()).decode()
+    viewer_html = f"""
+    <div id='viewer-container' style='width: 100%; height: 600px;'></div>
+    <script>
+        // Prevent libraries from thinking we run in Node
+        window.process = {{ versions: {{}} }};
+    </script>
+    <script type='module'>
+        import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle&deps=three@0.160.1,bim-fragment@1.5.0';
 
-            const components = new OBC.Components();
-            components.scene = new OBC.SimpleScene(components);
-            const container = document.getElementById('viewer-container');
-            components.renderer = new OBC.SimpleRenderer(components, container);
-            components.camera = new OBC.SimpleCamera(components);
-            await components.init();
+        const components = new OBC.Components();
+        components.scene = new OBC.SimpleScene(components);
+        const container = document.getElementById('viewer-container');
+        components.renderer = new OBC.SimpleRenderer(components, container);
+        components.camera = new OBC.SimpleCamera(components);
+        await components.init();
 
-            const fragments = components.get(OBC.FragmentsManager);
-            const ifcLoader = components.get(OBC.IfcLoader);
-            ifcLoader.settings.wasm = {{ absolute: true, path: 'https://unpkg.com/web-ifc@0.0.68/' }};
-            await ifcLoader.setup();
+        const ifcLoader = components.get(OBC.IfcLoader);
+        ifcLoader.settings.wasm = { absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' };
+        await ifcLoader.setup();
 
-            const base64Data = '{b64_ifc}';
-            const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-            const model = await ifcLoader.load(ifcBytes);
-            model.name = 'uploaded';
-            components.scene.three.add(model);
-        </script>
-        """
-        st.components.v1.html(viewer_html, height=600)
+        const base64Data = '{b64_ifc}';
+        const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+        const model = await ifcLoader.load(ifcBytes);
+        model.name = 'uploaded';
+        components.scene.three.add(model);
+    </script>
+    """
+    st.components.v1.html(viewer_html, height=600)
 
     with st.expander("Informații proiect", expanded=True):
         project_name      = st.text_input("Număr proiect", value=project.Name or "")
@@ -281,8 +238,6 @@ if uploaded_file:
             "Country": "Romania"
         }
         
-        has_address_data = any(v for k, v in address_props.items() if k != "Country" and v.strip())
-
         # Actualizăm proprietățile de adresă
         # PSet-ul va fi creat de update_single_value dacă nu există
         for prop_name, prop_value in address_props.items():

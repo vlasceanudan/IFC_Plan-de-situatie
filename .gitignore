@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+.eggs/
+.Python
+build/
+dist/
+*.so
+
+# Virtual environments
+venv/
+ENV/
+.venv/
+
+# Streamlit cache
+.streamlit/
+
+# Temporary files
+*.tmp
+*.log
+
