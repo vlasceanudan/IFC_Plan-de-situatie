@@ -168,7 +168,7 @@ if uploaded_file:
         await components.init();
 
         const ifcLoader = components.get(OBC.IfcLoader);
-        ifcLoader.settings.wasm = { absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' };
+        ifcLoader.settings.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
         await ifcLoader.setup();
 
         const base64Data = '{b64_ifc}';
