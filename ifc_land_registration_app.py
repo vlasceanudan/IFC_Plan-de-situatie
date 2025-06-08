@@ -154,11 +154,12 @@ if uploaded_file:
     viewer_html = f"""
     <div id='viewer-container' style='width: 100%; height: 600px;'></div>
     <script>
-        // Prevent libraries from thinking we run in Node
+        // Prevent libraries from thinking we run in Node and CommonJS
         window.process = {{ versions: {{}} }};
+        window.module = {{}};
     </script>
     <script type='module'>
-        import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle&deps=three@0.160.1,bim-fragment@1.5.0';
+        import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle';
 
         const components = new OBC.Components();
         components.scene = new OBC.SimpleScene(components);
