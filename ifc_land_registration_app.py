@@ -153,7 +153,7 @@ if uploaded_file:
         viewer_html = f"""
         <div id='viewer-container' style='width: 100%; height: 600px;'></div>
         <script type='module'>
-            import * as OBC from 'https://cdn.jsdelivr.net/npm/openbim-components@1.5.1/src/index.min.js';
+            import * as OBC from 'https://unpkg.com/openbim-components@1.5.1?module';
             import * as FRAGS from 'https://cdn.jsdelivr.net/npm/@thatopen/fragments@3.0.7/dist/index.mjs';
 
             const components = new OBC.Components();
