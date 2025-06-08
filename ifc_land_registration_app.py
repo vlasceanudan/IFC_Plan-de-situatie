@@ -170,19 +170,19 @@ if uploaded_file:
 
             const workerUrl = 'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
             const workerText = await (await fetch(workerUrl)).text();
-            const workerFile = new File([workerText], 'worker.mjs', { type: 'text/javascript' });
+            const workerFile = new File([workerText], 'worker.mjs', {{ type: 'text/javascript' }});
             const workerBlobURL = URL.createObjectURL(workerFile);
             const fragments = new FRAGS.FragmentsModels(workerBlobURL);
             world.camera.controls.addEventListener('update', () => fragments.update());
             world.camera.controls.addEventListener('rest', () => fragments.update(true));
 
             const importer = new FRAGS.IfcImporter();
-            importer.wasm = { absolute: true, path: 'https://unpkg.com/web-ifc@0.0.68/' };
+            importer.wasm = {{ absolute: true, path: 'https://unpkg.com/web-ifc@0.0.68/' }};
 
             const base64Data = '{b64_ifc}';
             const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-            const fragmentBytes = await importer.process({ bytes: ifcBytes });
-            const model = await fragments.load(fragmentBytes, { modelId: 'uploaded' });
+            const fragmentBytes = await importer.process({{ bytes: ifcBytes }});
+            const model = await fragments.load(fragmentBytes, {{ modelId: 'uploaded' }});
             model.useCamera(world.camera.three);
             world.scene.three.add(model.object);
             await fragments.update(true);
