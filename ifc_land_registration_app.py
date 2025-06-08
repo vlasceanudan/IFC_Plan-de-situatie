@@ -7,6 +7,8 @@ import tempfile
 import io
 import os
 import base64
+import re
+from urllib.parse import urlsplit
 
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
@@ -16,8 +18,49 @@ import base64
 #     PSet_Address dacă există. Adăugat placeholder pentru selecție județ.
 #     Corectat load_ifc_from_upload pentru memoryview.
 #     Corectat create_beneficiar: eliminat GlobalId pentru IfcOrganization/IfcPerson.
+
 #     Corectat exportul IFC pentru a folosi model.to_string() cu BytesIO.
 # ---------------------------------------------------------------------------
+
+THREE_VERSION = "0.160.1"
+
+_THREE_RE = re.compile(r'(["\'])(/three[^"\']*)\1')
+
+
+def _rewrite_imports(src: str) -> str:
+    """Rewrite Three.js imports to use esm.sh with explicit version."""
+
+    def repl(match: re.Match) -> str:
+        quote = match.group(1)
+        url = match.group(2)
+        parts = urlsplit(url)
+        path = parts.path
+        query = f"?{parts.query}" if parts.query else ""
+
+        after = path[len("/three") :]
+        version_spec = ""
+        subpath = ""
+        if after.startswith("@"):  # e.g. /three@^0.160/examples...
+            after = after[1:]
+            if "/" in after:
+                version_spec, subpath = after.split("/", 1)
+                subpath = "/" + subpath
+            else:
+                version_spec = after
+        else:
+            subpath = after
+
+        if version_spec:
+            if version_spec.startswith((">=", "^", "~")):
+                version = THREE_VERSION
+            else:
+                version = re.sub(r"^[^0-9]*", "", version_spec)
+        else:
+            version = THREE_VERSION
+
+        return f"{quote}https://esm.sh/three@{version}{subpath}{query}{quote}"
+
+    return _THREE_RE.sub(repl, src)
 
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
 
