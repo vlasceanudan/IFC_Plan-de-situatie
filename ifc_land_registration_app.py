@@ -200,8 +200,7 @@ if uploaded_file:
             window.process = {{ versions: {{}} }};
         </script>
         <script type='module'>
-            import * as OBC from 'https://cdn.jsdelivr.net/npm/openbim-components@1.5.1/+esm';
-            import * as FRAGS from 'https://cdn.jsdelivr.net/npm/@thatopen/fragments@2.0.5/+esm';
+            import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle&deps=three@0.160.1,bim-fragment@1.5.0';
 
             const components = new OBC.Components();
             components.scene = new OBC.SimpleScene(components);
@@ -210,24 +209,16 @@ if uploaded_file:
             components.camera = new OBC.SimpleCamera(components);
             await components.init();
 
-            const workerUrl = 'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
-            const workerText = await (await fetch(workerUrl)).text();
-            const workerFile = new File([workerText], 'worker.mjs', {{ type: 'text/javascript' }});
-            const workerBlobURL = URL.createObjectURL(workerFile);
-            const fragments = new FRAGS.FragmentsModels(workerBlobURL);
-            components.camera.controls.addEventListener('update', () => fragments.update());
-            components.camera.controls.addEventListener('rest', () => fragments.update(true));
-
-            const importer = new FRAGS.IfcImporter();
-            importer.wasm = {{ absolute: true, path: 'https://unpkg.com/web-ifc@0.0.68/' }};
+            const fragments = components.get(OBC.FragmentsManager);
+            const ifcLoader = components.get(OBC.IfcLoader);
+            ifcLoader.settings.wasm = {{ absolute: true, path: 'https://unpkg.com/web-ifc@0.0.68/' }};
+            await ifcLoader.setup();
 
             const base64Data = '{b64_ifc}';
             const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-            const fragmentBytes = await importer.process({{ bytes: ifcBytes }});
-            const model = await fragments.load(fragmentBytes, {{ modelId: 'uploaded' }});
-            model.useCamera(components.camera.three);
-            components.scene.three.add(model.object);
-            await fragments.update(true);
+            const model = await ifcLoader.load(ifcBytes);
+            model.name = 'uploaded';
+            components.scene.three.add(model);
         </script>
         """
         st.components.v1.html(viewer_html, height=600)
