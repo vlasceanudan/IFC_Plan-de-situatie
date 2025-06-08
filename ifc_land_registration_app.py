@@ -7,6 +7,7 @@ import tempfile
 import io
 import os
 import base64
+import subprocess
 
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
@@ -79,6 +80,32 @@ def load_ifc_from_upload(uploaded_file_mv: memoryview):
         if tmp_file_path and os.path.exists(tmp_file_path):
             os.remove(tmp_file_path)
 
+def convert_to_fragments(uploaded_file_mv: memoryview) -> bytes:
+    """Convert uploaded IFC bytes to fragments using the Node script."""
+    tmp_ifc_path = ""
+    tmp_frag_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp_ifc:
+            tmp_ifc.write(uploaded_file_mv)
+            tmp_ifc_path = tmp_ifc.name
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifcfrag") as tmp_frag:
+            tmp_frag_path = tmp_frag.name
+
+        subprocess.run([
+            "node",
+            os.path.join(os.path.dirname(__file__), "convert_to_fragments.js"),
+            tmp_ifc_path,
+            tmp_frag_path,
+        ], check=True)
+
+        with open(tmp_frag_path, "rb") as f:
+            return f.read()
+    finally:
+        for p in (tmp_ifc_path, tmp_frag_path):
+            if p and os.path.exists(p):
+                os.remove(p)
+
 def list_sites(model):
     return model.by_type("IfcSite")
 
@@ -150,7 +177,8 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
-    b64_ifc = base64.b64encode(uploaded_file.getvalue()).decode()
+    frag_bytes = convert_to_fragments(uploaded_file.getbuffer())
+    b64_frag = base64.b64encode(frag_bytes).decode()
     viewer_html = f"""
     <div id='viewer-container' style='width: 100%; height: 600px;'></div>
     <script>
@@ -173,7 +201,7 @@ if uploaded_file:
         ifcLoader.settings.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
         await ifcLoader.setup();
 
-        const base64Data = '{b64_ifc}';
+        const base64Data = '{b64_frag}';
         const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
         const model = await ifcLoader.load(ifcBytes);
         components.scene.get().add(model);
