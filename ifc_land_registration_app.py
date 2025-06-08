@@ -8,6 +8,7 @@ import io
 import os
 import base64
 import subprocess
+import shutil
 
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
@@ -80,8 +81,15 @@ def load_ifc_from_upload(uploaded_file_mv: memoryview):
         if tmp_file_path and os.path.exists(tmp_file_path):
             os.remove(tmp_file_path)
 
-def convert_to_fragments(uploaded_file_mv: memoryview) -> bytes:
-    """Convert uploaded IFC bytes to fragments using the Node script."""
+def convert_to_fragments(uploaded_file_mv: memoryview) -> bytes | None:
+    """Convert uploaded IFC bytes to fragments using the Node script.
+
+    Returns ``None`` if Node or the converter are unavailable.
+    """
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return None
+
     tmp_ifc_path = ""
     tmp_frag_path = ""
     try:
@@ -92,12 +100,20 @@ def convert_to_fragments(uploaded_file_mv: memoryview) -> bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".ifcfrag") as tmp_frag:
             tmp_frag_path = tmp_frag.name
 
-        subprocess.run([
-            "node",
-            os.path.join(os.path.dirname(__file__), "convert_to_fragments.js"),
-            tmp_ifc_path,
-            tmp_frag_path,
-        ], check=True)
+        try:
+            subprocess.run(
+                [
+                    node_bin,
+                    os.path.join(os.path.dirname(__file__), "convert_to_fragments.js"),
+                    tmp_ifc_path,
+                    tmp_frag_path,
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return None
 
         with open(tmp_frag_path, "rb") as f:
             return f.read()
@@ -178,7 +194,13 @@ if uploaded_file:
         st.stop()
 
     frag_bytes = convert_to_fragments(uploaded_file.getbuffer())
-    b64_frag = base64.b64encode(frag_bytes).decode()
+    if frag_bytes is None:
+        st.info(
+            "Node is not available; loading IFC directly. Large files may be slow."
+        )
+        b64_data = base64.b64encode(uploaded_file.getvalue()).decode()
+    else:
+        b64_data = base64.b64encode(frag_bytes).decode()
     viewer_html = f"""
     <div id='viewer-container' style='width: 100%; height: 600px;'></div>
     <script>
@@ -201,7 +223,7 @@ if uploaded_file:
         ifcLoader.settings.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
         await ifcLoader.setup();
 
-        const base64Data = '{b64_frag}';
+        const base64Data = '{b64_data}';
         const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
         const model = await ifcLoader.load(ifcBytes);
         components.scene.get().add(model);
