@@ -168,15 +168,14 @@ if uploaded_file:
         components.camera = new OBC.SimpleCamera(components);
         await components.init();
 
-        const ifcLoader = components.get(OBC.IfcLoader);
+        const ifcLoader = components.tools.get(OBC.FragmentIfcLoader);
         ifcLoader.settings.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
         await ifcLoader.setup();
 
         const base64Data = '{b64_ifc}';
         const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
         const model = await ifcLoader.load(ifcBytes);
-        model.name = 'uploaded';
-        components.scene.three.add(model);
+        components.scene.get().add(model);
     </script>
     """
     st.components.v1.html(viewer_html, height=600)
