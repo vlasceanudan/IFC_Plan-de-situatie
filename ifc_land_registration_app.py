@@ -167,6 +167,7 @@ if uploaded_file:
         components.renderer = new OBC.SimpleRenderer(components, container);
         components.camera = new OBC.SimpleCamera(components);
         await components.init();
+        await components.scene.setup();
 
         const ifcLoader = components.tools.get(OBC.FragmentIfcLoader);
         ifcLoader.settings.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
