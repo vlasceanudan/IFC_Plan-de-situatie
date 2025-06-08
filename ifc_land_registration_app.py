@@ -195,9 +195,13 @@ if uploaded_file:
         b64_ifc = base64.b64encode(uploaded_file.getvalue()).decode()
         viewer_html = f"""
         <div id='viewer-container' style='width: 100%; height: 600px;'></div>
+        <script>
+            // Prevent libraries from thinking we run in Node
+            window.process = {{ versions: {{}} }};
+        </script>
         <script type='module'>
-            import * as OBC from 'https://esm.sh/openbim-components@1.5.1?deps=three@0.160.1';
-            import * as FRAGS from 'https://esm.sh/@thatopen/fragments@3.0.7?deps=three@0.160.1';
+            import * as OBC from 'https://cdn.jsdelivr.net/npm/openbim-components@1.5.1/+esm';
+            import * as FRAGS from 'https://cdn.jsdelivr.net/npm/@thatopen/fragments@2.0.5/+esm';
 
             const components = new OBC.Components();
             components.scene = new OBC.SimpleScene(components);
