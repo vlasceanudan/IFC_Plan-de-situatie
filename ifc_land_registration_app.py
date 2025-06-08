@@ -20,6 +20,24 @@ import os
 
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
 
+# Global style adjustments
+st.markdown(
+    """
+    <style>
+        /* Hide Streamlit default header and footer */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+
+        /* Slightly larger font for expander headers */
+        .streamlit-expanderHeader {
+            font-size: 1.2rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Logo
 try:
     st.image("buildingsmart_romania_logo.jpg", width=300)
