@@ -196,28 +196,23 @@ if uploaded_file:
         viewer_html = f"""
         <div id='viewer-container' style='width: 100%; height: 600px;'></div>
         <script type='module'>
-            import * as OBC from 'https://cdn.jsdelivr.net/npm/openbim-components@1.5.1/+esm';
-            import * as FRAGS from 'https://cdn.jsdelivr.net/npm/@thatopen/fragments@3.0.7/+esm';
+            import * as OBC from 'https://esm.sh/openbim-components@1.5.1?deps=three@0.160.1';
+            import * as FRAGS from 'https://esm.sh/@thatopen/fragments@3.0.7?deps=three@0.160.1';
 
             const components = new OBC.Components();
-            const worlds = components.get(OBC.Worlds);
-            const world = worlds.create(OBC.SimpleScene, OBC.SimpleCamera, OBC.SimpleRenderer);
-
-            world.scene = new OBC.SimpleScene(components);
-            world.scene.setup();
+            components.scene = new OBC.SimpleScene(components);
             const container = document.getElementById('viewer-container');
-            world.renderer = new OBC.SimpleRenderer(components, container);
-
-            world.camera = new OBC.SimpleCamera(components);
-            components.init();
+            components.renderer = new OBC.SimpleRenderer(components, container);
+            components.camera = new OBC.SimpleCamera(components);
+            await components.init();
 
             const workerUrl = 'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
             const workerText = await (await fetch(workerUrl)).text();
             const workerFile = new File([workerText], 'worker.mjs', {{ type: 'text/javascript' }});
             const workerBlobURL = URL.createObjectURL(workerFile);
             const fragments = new FRAGS.FragmentsModels(workerBlobURL);
-            world.camera.controls.addEventListener('update', () => fragments.update());
-            world.camera.controls.addEventListener('rest', () => fragments.update(true));
+            components.camera.controls.addEventListener('update', () => fragments.update());
+            components.camera.controls.addEventListener('rest', () => fragments.update(true));
 
             const importer = new FRAGS.IfcImporter();
             importer.wasm = {{ absolute: true, path: 'https://unpkg.com/web-ifc@0.0.68/' }};
@@ -226,8 +221,8 @@ if uploaded_file:
             const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
             const fragmentBytes = await importer.process({{ bytes: ifcBytes }});
             const model = await fragments.load(fragmentBytes, {{ modelId: 'uploaded' }});
-            model.useCamera(world.camera.three);
-            world.scene.three.add(model.object);
+            model.useCamera(components.camera.three);
+            components.scene.three.add(model.object);
             await fragments.update(true);
         </script>
         """
