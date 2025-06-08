@@ -8,6 +8,7 @@ import io
 import os
 import base64
 import json
+import re
 
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
@@ -65,6 +66,11 @@ UI_ROM_COUNTIES = [DEFAULT_JUDET_PROMPT] + ROM_COUNTIES_BASE
 # ----------------------------------------------------------
 # Funcții helper
 # ----------------------------------------------------------
+
+def _rewrite_imports(js_code: str) -> str:
+    """Rewrite bare CDN-style imports to absolute esm.sh URLs."""
+    pattern = r'(?<=[\'"`])/([A-Za-z0-9@._/-]+)'
+    return re.sub(pattern, r'https://esm.sh/\1', js_code)
 
 def load_ifc_from_upload(uploaded_file_mv: memoryview):
     tmp_file_path = ""
@@ -154,9 +160,9 @@ if uploaded_file:
         obc_path = os.path.join(os.path.dirname(__file__), "js_libs", "openbim-components.esm.js")
         frags_path = os.path.join(os.path.dirname(__file__), "js_libs", "fragments.esm.js")
         with open(obc_path, "r", encoding="utf-8") as f:
-            obc_js = f.read()
+            obc_js = _rewrite_imports(f.read())
         with open(frags_path, "r", encoding="utf-8") as f:
-            frags_js = f.read()
+            frags_js = _rewrite_imports(f.read())
         obc_js_json = json.dumps(obc_js)
         frags_js_json = json.dumps(frags_js)
         viewer_html = f"""
