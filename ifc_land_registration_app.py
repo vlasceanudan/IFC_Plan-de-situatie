@@ -20,6 +20,24 @@ import os
 
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
 
+# Global style adjustments
+st.markdown(
+    """
+    <style>
+        /* Hide Streamlit default header and footer */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+
+        /* Slightly larger font for expander headers */
+        .streamlit-expanderHeader {
+            font-size: 1.2rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Logo
 try:
     st.image("buildingsmart_romania_logo.jpg", width=300)
@@ -129,43 +147,43 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
-    st.subheader("Informații proiect")
-    project_name      = st.text_input("Număr proiect", value=project.Name or "")
-    project_long_name = st.text_input("Nume proiect", value=project.LongName or "")
+    with st.expander("Informații proiect", expanded=True):
+        project_name      = st.text_input("Număr proiect", value=project.Name or "")
+        project_long_name = st.text_input("Nume proiect", value=project.LongName or "")
 
-    st.subheader("Beneficiar")
-    beneficiar_type = st.radio("Tip beneficiar", ["Persoană fizică", "Persoană juridică"], horizontal=True)
-    beneficiar_nume = st.text_input("Nume beneficiar")
+    with st.expander("Beneficiar", expanded=True):
+        beneficiar_type = st.radio("Tip beneficiar", ["Persoană fizică", "Persoană juridică"], horizontal=True)
+        beneficiar_nume = st.text_input("Nume beneficiar")
 
-    st.subheader("Date teren (PSet_LandRegistration)")
-    site_options = {i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}" for i in range(len(sites))}
-    idx = st.selectbox(
-        "Alegeți IfcSite-ul de editat",
-        options=list(site_options.keys()),
-        format_func=lambda i: site_options[i]
-    )
-    site = sites[idx]
+    with st.expander("Date teren (PSet_LandRegistration)", expanded=True):
+        site_options = {i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}" for i in range(len(sites))}
+        idx = st.selectbox(
+            "Alegeți IfcSite-ul de editat",
+            options=list(site_options.keys()),
+            format_func=lambda i: site_options[i]
+        )
+        site = sites[idx]
 
-    land_title_id = st.text_input("Nr. Cărții funciare", value=get_single_value(site, "PSet_LandRegistration", "LandTitleID"))
-    land_id       = st.text_input("Nr. Cadastral",       value=get_single_value(site, "PSet_LandRegistration", "LandId"))
+        land_title_id = st.text_input("Nr. Cărții funciare", value=get_single_value(site, "PSet_LandRegistration", "LandTitleID"))
+        land_id       = st.text_input("Nr. Cadastral",       value=get_single_value(site, "PSet_LandRegistration", "LandId"))
 
-    st.subheader("Adresă teren (PSet_Address)")
-    strada  = st.text_input("Stradă", value=get_single_value(site, "PSet_Address", "Street"))
-    oras    = st.text_input("Oraș",   value=get_single_value(site, "PSet_Address", "Town"))
+    with st.expander("Adresă teren (PSet_Address)", expanded=True):
+        strada  = st.text_input("Stradă", value=get_single_value(site, "PSet_Address", "Street"))
+        oras    = st.text_input("Oraș",   value=get_single_value(site, "PSet_Address", "Town"))
 
-    default_judet_val_from_ifc = get_single_value(site, "PSet_Address", "Region")
-    default_select_idx = 0 
+        default_judet_val_from_ifc = get_single_value(site, "PSet_Address", "Region")
+        default_select_idx = 0
 
-    if default_judet_val_from_ifc:
-        try:
-            original_list_idx = ROM_COUNTIES_BASE.index(default_judet_val_from_ifc)
-            default_select_idx = original_list_idx + 1
-        except ValueError:
-            pass 
-            
-    judet_selection = st.selectbox("Județ", UI_ROM_COUNTIES, index=default_select_idx)
+        if default_judet_val_from_ifc:
+            try:
+                original_list_idx = ROM_COUNTIES_BASE.index(default_judet_val_from_ifc)
+                default_select_idx = original_list_idx + 1
+            except ValueError:
+                pass
 
-    cod  = st.text_input("Cod poștal", value=get_single_value(site, "PSet_Address", "PostalCode"))
+        judet_selection = st.selectbox("Județ", UI_ROM_COUNTIES, index=default_select_idx)
+
+        cod  = st.text_input("Cod poștal", value=get_single_value(site, "PSet_Address", "PostalCode"))
 
     if st.button("Aplică modificările și generează descărcarea"):
         project.Name = project_name
