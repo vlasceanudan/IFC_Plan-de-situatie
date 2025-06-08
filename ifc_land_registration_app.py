@@ -7,6 +7,7 @@ import tempfile
 import io
 import os
 import base64
+import json
 
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
@@ -150,11 +151,23 @@ if uploaded_file:
 
     if uploaded_file:
         b64_ifc = base64.b64encode(uploaded_file.getvalue()).decode()
+        obc_path = os.path.join(os.path.dirname(__file__), "js_libs", "openbim-components.esm.js")
+        frags_path = os.path.join(os.path.dirname(__file__), "js_libs", "fragments.esm.js")
+        with open(obc_path, "r", encoding="utf-8") as f:
+            obc_js = f.read()
+        with open(frags_path, "r", encoding="utf-8") as f:
+            frags_js = f.read()
+        obc_js_json = json.dumps(obc_js)
+        frags_js_json = json.dumps(frags_js)
         viewer_html = f"""
         <div id='viewer-container' style='width: 100%; height: 600px;'></div>
         <script type='module'>
-            import * as OBC from 'https://unpkg.com/openbim-components@1.5.1/src/index.js?module';
-            import * as FRAGS from 'https://cdn.jsdelivr.net/npm/@thatopen/fragments@3.0.7/dist/index.mjs';
+            const obcCode = {obc_js_json};
+            const fragsCode = {frags_js_json};
+            const obcURL = URL.createObjectURL(new Blob([obcCode], {{ type: 'application/javascript' }}));
+            const fragsURL = URL.createObjectURL(new Blob([fragsCode], {{ type: 'application/javascript' }}));
+            const OBC = await import(obcURL);
+            const FRAGS = await import(fragsURL);
 
             const components = new OBC.Components();
             const worlds = components.get(OBC.Worlds);
