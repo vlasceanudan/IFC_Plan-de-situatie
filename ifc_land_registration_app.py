@@ -8,18 +8,6 @@ import io
 import os
 import base64
 
-# ---------------------------------------------------------------------------
-# 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
-# ---------------------------------------------------------------------------
-# Rev‑10 (2025‑06‑07): Câmpul „Județ/Regiune” devine dropdown cu toate județele
-#     României (inclusiv București). Valoarea implicită se preîncarcă din
-#     PSet_Address dacă există. Adăugat placeholder pentru selecție județ.
-#     Corectat load_ifc_from_upload pentru memoryview.
-#     Corectat create_beneficiar: eliminat GlobalId pentru IfcOrganization/IfcPerson.
-
-#     Corectat exportul IFC pentru a folosi model.to_string() cu BytesIO.
-# ---------------------------------------------------------------------------
-
 
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
 
@@ -154,41 +142,79 @@ if uploaded_file:
         st.stop()
 
     b64_ifc = base64.b64encode(file_bytes).decode()
+    
+    # --- START: CORRECTED VIEWER CODE ---
     viewer_html = f"""
-    <div id='viewer-container' style='width: 100%; height: 600px;'></div>
-    <script>
-        // Prevent libraries from thinking we run in Node and CommonJS
-        window.process = {{ versions: {{}} }};
-        window.module = {{}};
-    </script>
+    <div id='viewer-container' style='width: 100%; height: 600px; position: relative;'></div>
     <script type='module'>
-        import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle';
-        import * as FRAGS from 'https://esm.sh/@thatopen/fragments?bundle';
+        // Import the components library
+        import * as OBC from 'https://esm.sh/openbim-components';
 
-        const components = new OBC.Components();
-        components.scene = new OBC.SimpleScene(components);
         const container = document.getElementById('viewer-container');
-        components.renderer = new OBC.SimpleRenderer(components, container);
+        const components = new OBC.Components();
+
+        // Configure the main components
+        components.scene = new OBC.SimpleScene(components);
+        components.renderer = new OBC.PostproductionRenderer(components, container);
         components.camera = new OBC.SimpleCamera(components);
+        components.raycaster = new OBC.SimpleRaycaster(components);
+
+        // Initialize the components
         await components.init();
+
+        // Set the scene for the renderer and setup lighting
+        components.renderer.setBackdrop(OBC.BackdropColor.Light);
         await components.scene.setup();
 
-        const importer = new FRAGS.IfcImporter();
-        importer.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
-        const workerUrl = 'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
-        const fragments = new FRAGS.FragmentsModels(workerUrl);
-        components.camera.controls.addEventListener('rest', () => fragments.update(true));
-        components.camera.controls.addEventListener('update', () => fragments.update());
+        // Add a grid for better spatial context
+        new OBC.SimpleGrid(components, {{ size: 100 }});
 
+        // Create a main toolbar for UI elements
+        const mainToolbar = new OBC.Toolbar(components, {{
+            name: "Main Toolbar",
+            position: "bottom",
+        }});
+        components.ui.add(mainToolbar);
+
+        // Add camera controls (zoom, pan, orbit, fit-to-sphere) to the toolbar
+        const cameraControls = new OBC.CameraControls(components);
+        mainToolbar.addChild(cameraControls);
+
+        // Set up the IFC importer
+        const importer = new OBC.IfcImporter(components);
+
+        // Configure the path to the web-ifc WASM module
+        importer.settings.wasm = {{
+            path: "https://unpkg.com/web-ifc@0.0.55/",
+            absolute: true,
+        }};
+
+        // Get the base64 encoded IFC data from Python
         const base64Data = '{b64_ifc}';
-        const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-        const fragBytes = await importer.process({{ bytes: ifcBytes }});
-        const model = await fragments.load(fragBytes, {{ modelId: 'model' }});
-        model.useCamera(components.camera.three);
-        components.scene.get().add(model.object);
-        await fragments.update(true);
+
+        // Load the model
+        try {{
+            const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+            const model = await importer.load(buffer);
+            components.scene.add(model);
+
+            // Fit camera to the model after a short delay to ensure rendering is ready
+            setTimeout(() => {{
+                cameraControls.fitToSphere(model, true);
+            }}, 100);
+
+        }} catch (error) {{
+            console.error("Error loading IFC model:", error);
+            const errorElement = document.createElement('p');
+            errorElement.textContent = `A apărut o eroare la încărcarea modelului 3D: ${{error.message}}`;
+            errorElement.style.color = 'red';
+            errorElement.style.padding = '20px';
+            container.appendChild(errorElement);
+        }}
     </script>
     """
+    # --- END: CORRECTED VIEWER CODE ---
+    
     st.components.v1.html(viewer_html, height=600)
 
     with st.expander("Informații proiect", expanded=True):
@@ -250,32 +276,27 @@ if uploaded_file:
         }
         
         # Actualizăm proprietățile de adresă
-        # PSet-ul va fi creat de update_single_value dacă nu există
-        for prop_name, prop_value in address_props.items():
-            # Setăm proprietatea doar dacă are valoare sau este "Country"
-            # sau dacă PSet-ul există deja și vrem să ștergem valoarea (setând-o la "")
-            # Logica actuală: dacă prop_value e gol (ex. "" din UI), va fi setat ca "" în IFC
-            if prop_value or prop_name == "Country":
-                 update_single_value(model, site, "PSet_Address", prop_name, prop_value.strip())
-            elif get_single_value(site, "PSet_Address", prop_name): # Dacă există valoare în IFC dar nu în UI (e goală)
-                 update_single_value(model, site, "PSet_Address", prop_name, "") # O setăm la gol
+        address_pset = pset_or_create(model, site, "PSet_Address")
+        ifcopenshell.api.run(
+            "pset.edit_pset", 
+            model, 
+            pset=address_pset, 
+            properties={k: v.strip() for k, v in address_props.items()}
+        )
 
 
-        # --- Corectat aici ---
         # Export IFC
-        # Obține conținutul IFC ca string, apoi codifică-l în bytes
+        # Get the IFC content as a string, then encode it to bytes
         ifc_string_content = model.to_string()
         ifc_bytes_content = ifc_string_content.encode("utf-8")
         
-        # Creează un obiect BytesIO din conținutul byte
+        # Create a BytesIO object from the byte content
         file_data = io.BytesIO(ifc_bytes_content)
-        # file_data.seek(0) # Nu este necesar aici deoarece BytesIO este inițializat direct cu conținutul
-        # --- Sfârșit corecție ---
 
         st.success("Modificările au fost aplicate! Folosiți butonul de mai jos pentru a descărca fișierul IFC actualizat.")
         st.download_button(
             label="Descarcă IFC îmbogățit",
-            data=file_data, # Acum file_data este un BytesIO care conține datele fișierului
-            file_name=f"+{uploaded_file.name if uploaded_file else 'model'}",
+            data=file_data,
+            file_name=f"modificat_{uploaded_file.name if uploaded_file else 'model.ifc'}",
             mime="application/x-industry-foundation-classes",
         )
