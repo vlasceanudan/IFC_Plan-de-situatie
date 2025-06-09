@@ -143,77 +143,132 @@ if uploaded_file:
 
     b64_ifc = base64.b64encode(file_bytes).decode()
     
-    # --- START: CORRECTED VIEWER CODE ---
+    # --- START: VIEWER CODE WITH CONSOLE LOGS ---
     viewer_html = f"""
     <div id='viewer-container' style='width: 100%; height: 600px; position: relative;'></div>
     <script type='module'>
+        console.log("Viewer script started.");
+
         // Import the components library
         import * as OBC from 'https://esm.sh/openbim-components';
+        console.log("OBC imported.");
 
         const container = document.getElementById('viewer-container');
-        const components = new OBC.Components();
+        if (!container) {{
+            console.error("Viewer container not found!");
+        }} else {{
+            console.log("Viewer container found.");
+            const components = new OBC.Components();
 
-        // Configure the main components
-        components.scene = new OBC.SimpleScene(components);
-        components.renderer = new OBC.PostproductionRenderer(components, container);
-        components.camera = new OBC.SimpleCamera(components);
-        components.raycaster = new OBC.SimpleRaycaster(components);
+            // Configure the main components
+            components.scene = new OBC.SimpleScene(components);
+            components.renderer = new OBC.PostproductionRenderer(components, container);
+            components.camera = new OBC.SimpleCamera(components);
+            components.raycaster = new OBC.SimpleRaycaster(components);
+            console.log("OBC components configured.");
 
-        // Initialize the components
-        await components.init();
+            // Initialize the components
+            components.init().then(async () => {{
+                console.log("OBC components initialized.");
 
-        // Set the scene for the renderer and setup lighting
-        components.renderer.setBackdrop(OBC.BackdropColor.Light);
-        await components.scene.setup();
+                // Set the scene for the renderer and setup lighting
+                components.renderer.setBackdrop(OBC.BackdropColor.Light);
+                await components.scene.setup();
+                console.log("Scene setup complete.");
 
-        // Add a grid for better spatial context
-        new OBC.SimpleGrid(components, {{ size: 100 }});
+                // Add a grid for better spatial context
+                try {{
+                    new OBC.SimpleGrid(components, {{ size: 100 }});
+                    console.log("Grid added.");
+                }} catch (e) {{
+                     console.warn("Could not add grid:", e); // Grid might fail on older versions or specific setups
+                }}
 
-        // Create a main toolbar for UI elements
-        const mainToolbar = new OBC.Toolbar(components, {{
-            name: "Main Toolbar",
-            position: "bottom",
-        }});
-        components.ui.add(mainToolbar);
 
-        // Add camera controls (zoom, pan, orbit, fit-to-sphere) to the toolbar
-        const cameraControls = new OBC.CameraControls(components);
-        mainToolbar.addChild(cameraControls);
+                // Create a main toolbar for UI elements
+                const mainToolbar = new OBC.Toolbar(components, {{
+                    name: "Main Toolbar",
+                    position: "bottom",
+                }});
+                components.ui.add(mainToolbar);
+                console.log("Toolbar added.");
 
-        // Set up the IFC importer
-        const importer = new OBC.IfcImporter(components);
+                // Add camera controls (zoom, pan, orbit, fit-to-sphere) to the toolbar
+                const cameraControls = new OBC.CameraControls(components);
+                mainToolbar.addChild(cameraControls);
+                console.log("Camera controls added.");
 
-        // Configure the path to the web-ifc WASM module
-        importer.settings.wasm = {{
-            path: "https://unpkg.com/web-ifc@0.0.55/",
-            absolute: true,
-        }};
 
-        // Get the base64 encoded IFC data from Python
-        const base64Data = '{b64_ifc}';
+                // Set up the IFC importer
+                const importer = new OBC.IfcImporter(components);
+                console.log("IFC Importer created.");
 
-        // Load the model
-        try {{
-            const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-            const model = await importer.load(buffer);
-            components.scene.add(model);
+                // Configure the path to the web-ifc WASM module
+                importer.settings.wasm = {{
+                    path: "https://unpkg.com/web-ifc@0.0.55/",
+                    absolute: true,
+                }};
+                console.log("IFC Importer WASM path configured.");
 
-            // Fit camera to the model after a short delay to ensure rendering is ready
-            setTimeout(() => {{
-                cameraControls.fitToSphere(model, true);
-            }}, 100);
+                // Get the base64 encoded IFC data from Python
+                const base64Data = '{b64_ifc}';
+                console.log("Base64 data obtained.");
+                console.log("IFC base64 size:", base64Data.length);
 
-        }} catch (error) {{
-            console.error("Error loading IFC model:", error);
-            const errorElement = document.createElement('p');
-            errorElement.textContent = `A apărut o eroare la încărcarea modelului 3D: ${{error.message}}`;
-            errorElement.style.color = 'red';
-            errorElement.style.padding = '20px';
-            container.appendChild(errorElement);
+
+                // Load the model
+                try {{
+                    console.log("Attempting to load model...");
+                    const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                    console.log("Buffer created, size:", buffer.byteLength);
+                    const model = await importer.load(buffer);
+                    console.log("Model loaded:", model);
+                    
+                    if (model) {{
+                        components.scene.add(model);
+                        console.log("Model added to scene.");
+
+                        // Fit camera to the model after a short delay to ensure rendering is ready
+                        console.log("Attempting to fit camera...");
+                        setTimeout(() => {{
+                            try {{
+                                cameraControls.fitToSphere(model, true);
+                                console.log("Camera fitted to model.");
+                            }} catch (e) {{
+                                console.error("Error fitting camera:", e);
+                            }}
+                        }}, 500); // Increased timeout slightly
+
+                    }} else {{
+                        console.warn("Importer.load did not return a valid model.");
+                         const messageElement = document.createElement('p');
+                         messageElement.textContent = `Avertisment: Modelul IFC nu a putut fi încărcat corect sau nu conține geometrie vizibilă.`;
+                         messageElement.style.color = 'orange';
+                         messageElement.style.padding = '20px';
+                         container.appendChild(messageElement);
+                    }}
+
+
+                }} catch (error) {{
+                    console.error("Error loading IFC model:", error);
+                    const errorElement = document.createElement('p');
+                    errorElement.textContent = `A apărut o eroare la încărcarea modelului 3D: ${{error.message}}`;
+                    errorElement.style.color = 'red';
+                    errorElement.style.padding = '20px';
+                    container.appendChild(errorElement);
+                }}
+            }}).catch(initError => {{
+                 console.error("Error during OBC components initialization:", initError);
+                 const errorElement = document.createElement('p');
+                 errorElement.textContent = `A apărut o eroare la inițializarea vizualizatorului 3D: ${{initError.message}}`;
+                 errorElement.style.color = 'red';
+                 errorElement.style.padding = '20px';
+                 container.appendChild(errorElement);
+            }});
         }}
     </script>
     """
-    # --- END: CORRECTED VIEWER CODE ---
+    # --- END: VIEWER CODE WITH CONSOLE LOGS ---
     
     st.components.v1.html(viewer_html, height=600)
 
@@ -260,7 +315,22 @@ if uploaded_file:
         project.LongName = project_long_name
 
         if beneficiar_nume.strip():
-            create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type == "Persoană juridică"))
+            # Check if a beneficiary relationship already exists for the project with the "OWNER" role
+            existing_beneficiary = None
+            for rel in getattr(project, 'HasAssignments', []):
+                 if rel.is_a('IfcRelAssignsToActor'):
+                      if rel.ActingRole and rel.ActingRole.Role == 'OWNER':
+                           existing_beneficiary = rel.RelatingActor
+                           break # Found existing owner
+
+            # Only create a new beneficiary if none exists or if the name/type is different
+            # Note: This simple check doesn't handle multiple owners or changing an existing one's name/type easily.
+            # For simplicity here, we'll just add if none exists with OWNER role.
+            if not existing_beneficiary:
+                 create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type == "Persoană juridică"))
+            else:
+                 st.warning("Un beneficiar (OWNER) există deja pentru proiect și nu va fi creat altul.")
+
 
         update_single_value(model, site, "PSet_LandRegistration", "LandTitleID", land_title_id)
         update_single_value(model, site, "PSet_LandRegistration", "LandId", land_id)
@@ -277,6 +347,8 @@ if uploaded_file:
         
         # Actualizăm proprietățile de adresă
         address_pset = pset_or_create(model, site, "PSet_Address")
+        # Set properties, using .strip() to remove leading/trailing whitespace
+        # Empty strings from UI will result in unset properties in IFC, which is standard.
         ifcopenshell.api.run(
             "pset.edit_pset", 
             model, 
