@@ -20,6 +20,8 @@ Python 3.12 is expected (see `runtime.txt`). A dev container configuration is in
 
 After launching the app you will be prompted to upload an IFC file. The interface lets you edit project metadata, beneficiary details, land registration fields and the site address. When you apply the changes, an updated IFC file becomes available for download.
 
+The embedded 3D viewer only loads IFCs up to 8 MB. Larger files can still be edited and downloaded but won't be previewed to avoid browser crashes.
+
 ## Demo
 
 A live demo is available at [https://ifcplan-de-situatie-v0.streamlit.app/](https://ifcplan-de-situatie-v0.streamlit.app/).

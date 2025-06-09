@@ -63,15 +63,19 @@ ROM_COUNTIES_BASE = [
 DEFAULT_JUDET_PROMPT = "--- Selectați județul ---"
 UI_ROM_COUNTIES = [DEFAULT_JUDET_PROMPT] + ROM_COUNTIES_BASE
 
+# Maximum IFC size (in bytes) that will be displayed in the embedded viewer
+MAX_VIEWER_BYTES = 8 * 1024 * 1024  # 8 MB
+
 # ----------------------------------------------------------
 # Funcții helper
 # ----------------------------------------------------------
 
-def load_ifc_from_upload(uploaded_file_mv: memoryview):
+def load_ifc_from_upload(file_bytes: bytes):
+    """Load an IFC model from uploaded bytes."""
     tmp_file_path = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as temp_file:
-            temp_file.write(uploaded_file_mv)
+            temp_file.write(file_bytes)
             tmp_file_path = temp_file.name
         model = ifcopenshell.open(tmp_file_path)
         return model
@@ -138,7 +142,9 @@ st.title("Plan de situație IFC - Îmbogățire cu informații")
 uploaded_file = st.file_uploader("Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False)
 
 if uploaded_file:
-    model = load_ifc_from_upload(uploaded_file.getbuffer()) 
+    file_bytes = uploaded_file.getvalue()
+    model = load_ifc_from_upload(file_bytes)
+    file_size = len(file_bytes)
     
     project = get_project(model)
     if project is None:
@@ -150,36 +156,44 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
-    b64_ifc = base64.b64encode(uploaded_file.getvalue()).decode()
-    viewer_html = f"""
-    <div id='viewer-container' style='width: 100%; height: 600px;'></div>
-    <script>
-        // Prevent libraries from thinking we run in Node and CommonJS
-        window.process = {{ versions: {{}} }};
-        window.module = {{}};
-    </script>
-    <script type='module'>
-        import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle';
+    if file_size <= MAX_VIEWER_BYTES:
+        b64_ifc = base64.b64encode(file_bytes).decode()
+        viewer_html = f"""
+        <div id='viewer-container' style='width: 100%; height: 600px;'></div>
+        <script>
+            // Prevent libraries from thinking we run in Node and CommonJS
+            window.process = {{ versions: {{}} }};
+            window.module = {{}};
+        </script>
+        <script type='module'>
+            import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle';
+            import * as FRAGS from 'https://esm.sh/@thatopen/fragments?bundle';
 
-        const components = new OBC.Components();
-        components.scene = new OBC.SimpleScene(components);
-        const container = document.getElementById('viewer-container');
-        components.renderer = new OBC.SimpleRenderer(components, container);
-        components.camera = new OBC.SimpleCamera(components);
-        await components.init();
-        await components.scene.setup();
+            const components = new OBC.Components();
+            components.scene = new OBC.SimpleScene(components);
+            const container = document.getElementById('viewer-container');
+            components.renderer = new OBC.SimpleRenderer(components, container);
+            components.camera = new OBC.SimpleCamera(components);
+            await components.init();
+            await components.scene.setup();
 
-        const ifcLoader = components.tools.get(OBC.FragmentIfcLoader);
-        ifcLoader.settings.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
-        await ifcLoader.setup();
+            const importer = new FRAGS.IfcImporter();
+            importer.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
+            const workerUrl = 'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
+            const fragments = new FRAGS.FragmentsModels(workerUrl);
 
-        const base64Data = '{b64_ifc}';
-        const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-        const model = await ifcLoader.load(ifcBytes);
-        components.scene.get().add(model);
-    </script>
-    """
-    st.components.v1.html(viewer_html, height=600)
+            const base64Data = '{b64_ifc}';
+            const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+            const fragBytes = await importer.process({ bytes: ifcBytes });
+            const model = await fragments.load(fragBytes, {{ modelId: 'model' }});
+            components.scene.get().add(model.object);
+        </script>
+        """
+        st.components.v1.html(viewer_html, height=600)
+    else:
+        st.info(
+            'Fișierul IFC este prea mare pentru a fi previzualizat. Poate fi totuși modificat și descărcat.'
+        )
 
     with st.expander("Informații proiect", expanded=True):
         project_name      = st.text_input("Număr proiect", value=project.Name or "")
