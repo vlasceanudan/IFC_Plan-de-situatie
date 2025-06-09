@@ -64,7 +64,7 @@ DEFAULT_JUDET_PROMPT = "--- Selectați județul ---"
 UI_ROM_COUNTIES = [DEFAULT_JUDET_PROMPT] + ROM_COUNTIES_BASE
 
 # Maximum IFC size (in bytes) that will be displayed in the embedded viewer
-MAX_VIEWER_BYTES = 8 * 1024 * 1024  # 8 MB
+MAX_VIEWER_BYTES =  20 * 1024 * 1024  # 200 MB
 
 # ----------------------------------------------------------
 # Funcții helper
