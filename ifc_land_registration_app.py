@@ -174,7 +174,7 @@ if uploaded_file:
         await components.scene.setup();
 
         const importer = new FRAGS.IfcImporter();
-        importer.wasm = { absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' };
+        importer.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
         const workerUrl = 'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
         const fragments = new FRAGS.FragmentsModels(workerUrl);
         components.camera.controls.addEventListener('rest', () => fragments.update(true));
