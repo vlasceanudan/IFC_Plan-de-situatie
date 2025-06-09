@@ -174,15 +174,19 @@ if uploaded_file:
         await components.scene.setup();
 
         const importer = new FRAGS.IfcImporter();
-        importer.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
+        importer.wasm = { absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' };
         const workerUrl = 'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
         const fragments = new FRAGS.FragmentsModels(workerUrl);
+        components.camera.controls.addEventListener('rest', () => fragments.update(true));
+        components.camera.controls.addEventListener('update', () => fragments.update());
 
         const base64Data = '{b64_ifc}';
         const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
         const fragBytes = await importer.process({{ bytes: ifcBytes }});
         const model = await fragments.load(fragBytes, {{ modelId: 'model' }});
+        model.useCamera(components.camera.three);
         components.scene.get().add(model.object);
+        await fragments.update(true);
     </script>
     """
     st.components.v1.html(viewer_html, height=600)
