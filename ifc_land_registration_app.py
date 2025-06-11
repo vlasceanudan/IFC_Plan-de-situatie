@@ -1,52 +1,42 @@
+# ---------------------------------------------------------------------------
+# 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
+# Rev-11  (2025-06-12):  • Zero-copy export for large IFCs
+#                        • Safer download filename
+#                        • Minor tidy-ups (Path, spinner, temp-cleanup)
+# ---------------------------------------------------------------------------
+
 import streamlit as st
 import ifcopenshell
 import ifcopenshell.api
 import ifcopenshell.util.element as util
 import ifcopenshell.guid as guid
 import tempfile
-import io
 import os
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
+# Global Streamlit settings & styling
 # ---------------------------------------------------------------------------
-# Rev‑10 (2025‑06‑07): Câmpul „Județ/Regiune” devine dropdown cu toate județele
-#     României (inclusiv București). Valoarea implicită se preîncarcă din
-#     PSet_Address dacă există. Adăugat placeholder pentru selecție județ.
-#     Corectat load_ifc_from_upload pentru memoryview.
-#     Corectat create_beneficiar: eliminat GlobalId pentru IfcOrganization/IfcPerson.
-#     Corectat exportul IFC pentru a folosi model.to_string() cu BytesIO.
-# ---------------------------------------------------------------------------
-
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
 
-# Global style adjustments
 st.markdown(
     """
     <style>
-        /* Hide Streamlit default header and footer */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-
-        /* Slightly larger font for expander headers */
-        .streamlit-expanderHeader {
-            font-size: 1.2rem;
-        }
+        #MainMenu, header, footer {visibility: hidden;}
+        .streamlit-expanderHeader {font-size: 1.2rem;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# Logo
 try:
     st.image("buildingsmart_romania_logo.jpg", width=300)
 except Exception:
     pass
 
-# ----------------------------------------------------------
-# Date statice
-# ----------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Static data
+# ---------------------------------------------------------------------------
 ROM_COUNTIES_BASE = [
     "Alba", "Arad", "Argeș", "Bacău", "Bihor", "Bistrița-Năsăud", "Botoșani",
     "Brașov", "Brăila", "București", "Buzău", "Caraș-Severin", "Călărași",
@@ -56,25 +46,24 @@ ROM_COUNTIES_BASE = [
     "Sibiu", "Suceava", "Teleorman", "Timiș", "Tulcea", "Vâlcea", "Vaslui",
     "Vrancea",
 ]
-
 DEFAULT_JUDET_PROMPT = "--- Selectați județul ---"
 UI_ROM_COUNTIES = [DEFAULT_JUDET_PROMPT] + ROM_COUNTIES_BASE
 
-# ----------------------------------------------------------
-# Funcții helper
-# ----------------------------------------------------------
-
-def load_ifc_from_upload(uploaded_file_mv: memoryview):
-    tmp_file_path = ""
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+def load_ifc_from_upload(uploaded_mv: memoryview):
+    """Persist upload to a temp file → open with IfcOpenShell → delete file."""
+    tmp_path = ""
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as temp_file:
-            temp_file.write(uploaded_file_mv)
-            tmp_file_path = temp_file.name
-        model = ifcopenshell.open(tmp_file_path)
-        return model
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tf:
+            tf.write(uploaded_mv)
+            tmp_path = tf.name
+        return ifcopenshell.open(tmp_path)
     finally:
-        if tmp_file_path and os.path.exists(tmp_file_path):
-            os.remove(tmp_file_path)
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 
 def list_sites(model):
     return model.by_type("IfcSite")
@@ -90,8 +79,9 @@ def find_pset_instance(product, pset_name):
 
 
 def pset_or_create(model, product, pset_name):
-    pset = find_pset_instance(product, pset_name)
-    return pset or ifcopenshell.api.run("pset.add_pset", model, product=product, name=pset_name)
+    return find_pset_instance(product, pset_name) or ifcopenshell.api.run(
+        "pset.add_pset", model, product=product, name=pset_name
+    )
 
 
 def update_single_value(model, product, pset_name, prop, value):
@@ -100,8 +90,8 @@ def update_single_value(model, product, pset_name, prop, value):
 
 
 def get_single_value(product, pset_name, prop):
-    pset_properties = util.get_pset(product, pset_name)
-    return pset_properties.get(prop, "") if pset_properties else ""
+    props = util.get_pset(product, pset_name)
+    return props.get(prop, "") if props else ""
 
 
 def get_project(model):
@@ -114,29 +104,65 @@ def create_beneficiar(model, project, nume, is_org):
     if is_org:
         actor = model.create_entity("IfcOrganization", Name=nume)
     else:
-        parts = nume.split(maxsplit=1); given, family = (parts + [""])[:2]
+        parts = nume.split(maxsplit=1)
+        given, family = (parts + [""])[:2]
         actor = model.create_entity("IfcPerson", GivenName=given, FamilyName=family)
-    
-    role = model.create_entity("IfcActorRole", Role="OWNER") 
-    
+
+    role = model.create_entity("IfcActorRole", Role="OWNER")
+
     model.create_entity(
         "IfcRelAssignsToActor",
-        GlobalId=guid.new(), OwnerHistory=oh, Name="Beneficiar",
-        RelatedObjects=[project], RelatingActor=actor, ActingRole=role,
+        GlobalId=guid.new(),
+        OwnerHistory=oh,
+        Name="Beneficiar",
+        RelatedObjects=[project],
+        RelatingActor=actor,
+        ActingRole=role,
     )
     return actor
 
-# ----------------------------------------------------------
-# UI
-# ----------------------------------------------------------
 
+def stream_ifc_for_download(model, original_name: str):
+    """
+    Write the IFC to a temp file on disk (no big RAM copy),
+    then expose it via st.download_button. The opened file handle
+    is passed directly, so Streamlit streams it in chunks.
+    """
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ifc")
+    tmp_path = Path(tmp.name)
+    tmp.close()  # we only needed the path
+
+    try:
+        with st.spinner("Se scrie fișierul IFC…"):
+            model.write(str(tmp_path))
+
+        # Open in binary read-mode **without** reading into memory
+        file_handle = tmp_path.open("rb")
+        st.download_button(
+            label="Descarcă IFC îmbunătățit",
+            data=file_handle,
+            file_name=f"{Path(original_name).stem}_imbunatatit.ifc",
+            mime="application/x-industry-foundation-classes",
+        )
+    finally:
+        # Clean up the temp file *after* the download is served.
+        # We can't delete right away (file is in use), so we
+        # register removal when Streamlit script ends.
+        st.session_state.setdefault("_files_to_delete", []).append(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Main UI
+# ---------------------------------------------------------------------------
 st.title("Plan de situație IFC - Îmbogățire cu informații")
 
-uploaded_file = st.file_uploader("Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False)
+uploaded_file = st.file_uploader(
+    "Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False
+)
 
 if uploaded_file:
-    model = load_ifc_from_upload(uploaded_file.getbuffer()) 
-    
+    model = load_ifc_from_upload(uploaded_file.getbuffer())
+
     project = get_project(model)
     if project is None:
         st.error("Nu există niciun IfcProject în model.")
@@ -147,93 +173,95 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
+    # ---------------- Project info ----------------
     with st.expander("Informații proiect", expanded=True):
-        project_name      = st.text_input("Număr proiect", value=project.Name or "")
+        project_name = st.text_input("Număr proiect", value=project.Name or "")
         project_long_name = st.text_input("Nume proiect", value=project.LongName or "")
 
+    # ---------------- Beneficiary -----------------
     with st.expander("Beneficiar", expanded=True):
-        beneficiar_type = st.radio("Tip beneficiar", ["Persoană fizică", "Persoană juridică"], horizontal=True)
+        beneficiar_type = st.radio(
+            "Tip beneficiar", ["Persoană fizică", "Persoană juridică"], horizontal=True
+        )
         beneficiar_nume = st.text_input("Nume beneficiar")
 
+    # ---------------- Land registration ----------
     with st.expander("Date teren (PSet_LandRegistration)", expanded=True):
-        site_options = {i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}" for i in range(len(sites))}
+        site_options = {
+            i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}"
+            for i in range(len(sites))
+        }
         idx = st.selectbox(
             "Alegeți IfcSite-ul de editat",
             options=list(site_options.keys()),
-            format_func=lambda i: site_options[i]
+            format_func=lambda i: site_options[i],
         )
         site = sites[idx]
 
-        land_title_id = st.text_input("Nr. Cărții funciare", value=get_single_value(site, "PSet_LandRegistration", "LandTitleID"))
-        land_id       = st.text_input("Nr. Cadastral",       value=get_single_value(site, "PSet_LandRegistration", "LandId"))
+        land_title_id = st.text_input(
+            "Nr. Cărții funciare",
+            value=get_single_value(site, "PSet_LandRegistration", "LandTitleID"),
+        )
+        land_id = st.text_input(
+            "Nr. Cadastral",
+            value=get_single_value(site, "PSet_LandRegistration", "LandId"),
+        )
 
+    # ---------------- Address ---------------------
     with st.expander("Adresă teren (PSet_Address)", expanded=True):
-        strada  = st.text_input("Stradă", value=get_single_value(site, "PSet_Address", "Street"))
-        oras    = st.text_input("Oraș",   value=get_single_value(site, "PSet_Address", "Town"))
+        strada = st.text_input("Stradă", value=get_single_value(site, "PSet_Address", "Street"))
+        oras = st.text_input("Oraș", value=get_single_value(site, "PSet_Address", "Town"))
 
         default_judet_val_from_ifc = get_single_value(site, "PSet_Address", "Region")
-        default_select_idx = 0
-
-        if default_judet_val_from_ifc:
-            try:
-                original_list_idx = ROM_COUNTIES_BASE.index(default_judet_val_from_ifc)
-                default_select_idx = original_list_idx + 1
-            except ValueError:
-                pass
+        try:
+            default_select_idx = ROM_COUNTIES_BASE.index(default_judet_val_from_ifc) + 1
+        except ValueError:
+            default_select_idx = 0
 
         judet_selection = st.selectbox("Județ", UI_ROM_COUNTIES, index=default_select_idx)
+        cod = st.text_input(
+            "Cod poștal", value=get_single_value(site, "PSet_Address", "PostalCode")
+        )
 
-        cod  = st.text_input("Cod poștal", value=get_single_value(site, "PSet_Address", "PostalCode"))
-
+    # ---------------- Apply / export --------------
     if st.button("Aplică modificările și generează descărcarea"):
+        # ••• Write back to model •••
         project.Name = project_name
         project.LongName = project_long_name
 
         if beneficiar_nume.strip():
-            create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type == "Persoană juridică"))
+            create_beneficiar(
+                model, project, beneficiar_nume.strip(), is_org=(beneficiar_type == "Persoană juridică")
+            )
 
         update_single_value(model, site, "PSet_LandRegistration", "LandTitleID", land_title_id)
         update_single_value(model, site, "PSet_LandRegistration", "LandId", land_id)
 
-        actual_judet_to_save = judet_selection if judet_selection != DEFAULT_JUDET_PROMPT else ""
-        
+        actual_judet = judet_selection if judet_selection != DEFAULT_JUDET_PROMPT else ""
         address_props = {
-            "Street": strada, 
-            "Town": oras, 
-            "Region": actual_judet_to_save,
-            "PostalCode": cod, 
-            "Country": "Romania"
+            "Street": strada,
+            "Town": oras,
+            "Region": actual_judet,
+            "PostalCode": cod,
+            "Country": "Romania",
         }
-        
-        has_address_data = any(v for k, v in address_props.items() if k != "Country" and v.strip())
+        for prop, val in address_props.items():
+            update_single_value(model, site, "PSet_Address", prop, val.strip())
 
-        # Actualizăm proprietățile de adresă
-        # PSet-ul va fi creat de update_single_value dacă nu există
-        for prop_name, prop_value in address_props.items():
-            # Setăm proprietatea doar dacă are valoare sau este "Country"
-            # sau dacă PSet-ul există deja și vrem să ștergem valoarea (setând-o la "")
-            # Logica actuală: dacă prop_value e gol (ex. "" din UI), va fi setat ca "" în IFC
-            if prop_value or prop_name == "Country":
-                 update_single_value(model, site, "PSet_Address", prop_name, prop_value.strip())
-            elif get_single_value(site, "PSet_Address", prop_name): # Dacă există valoare în IFC dar nu în UI (e goală)
-                 update_single_value(model, site, "PSet_Address", prop_name, "") # O setăm la gol
-
-
-        # --- Corectat aici ---
-        # Export IFC
-        # Obține conținutul IFC ca string, apoi codifică-l în bytes
-        ifc_string_content = model.to_string()
-        ifc_bytes_content = ifc_string_content.encode("utf-8")
-        
-        # Creează un obiect BytesIO din conținutul byte
-        file_data = io.BytesIO(ifc_bytes_content)
-        # file_data.seek(0) # Nu este necesar aici deoarece BytesIO este inițializat direct cu conținutul
-        # --- Sfârșit corecție ---
-
-        st.success("Modificările au fost aplicate! Folosiți butonul de mai jos pentru a descărca fișierul IFC actualizat.")
-        st.download_button(
-            label="Descarcă IFC îmbogățit",
-            data=file_data, # Acum file_data este un BytesIO care conține datele fișierului
-            file_name=f"+{uploaded_file.name if uploaded_file else 'model'}",
-            mime="application/x-industry-foundation-classes",
+        st.success(
+            "Modificările au fost aplicate! Folosiți butonul de mai jos pentru a descărca fișierul IFC actualizat."
         )
+        stream_ifc_for_download(model, uploaded_file.name)
+
+# ---------------------------------------------------------------------------
+# Session-end cleanup of temp files
+# ---------------------------------------------------------------------------
+def _cleanup_temp_files():
+    for p in st.session_state.get("_files_to_delete", []):
+        try:
+            p.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+# Register the cleanup so it runs when ScriptRunner shuts down
+st.on_session_end(_cleanup_temp_files)
