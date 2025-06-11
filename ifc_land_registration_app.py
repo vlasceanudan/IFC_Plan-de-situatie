@@ -1,8 +1,9 @@
 # ---------------------------------------------------------------------------
 # 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
-# Rev-11  (2025-06-12):  • Zero-copy export for large IFCs
-#                        • Safer download filename
-#                        • Minor tidy-ups (Path, spinner, temp-cleanup)
+# Rev-12  (2025-06-12)
+#   • Zero-copy export for large IFCs (temp-file + streamed handle)
+#   • Removed st.on_session_end() to keep compatibility with older Streamlit
+#   • Safer download filename, minor tidy-ups
 # ---------------------------------------------------------------------------
 
 import streamlit as st
@@ -15,10 +16,9 @@ import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Global Streamlit settings & styling
+# Streamlit page setup & styling
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
-
 st.markdown(
     """
     <style>
@@ -28,7 +28,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
 try:
     st.image("buildingsmart_romania_logo.jpg", width=300)
 except Exception:
@@ -69,19 +68,15 @@ def list_sites(model):
     return model.by_type("IfcSite")
 
 
-def find_pset_instance(product, pset_name):
+def pset_or_create(model, product, pset_name):
+    pset = None
     for rel in getattr(product, "HasAssociations", []):
         if rel.is_a("IfcRelDefinesByProperties"):
-            pdef = rel.RelatingPropertyDefinition
-            if pdef.is_a("IfcPropertySet") and pdef.Name == pset_name:
-                return pdef
-    return None
-
-
-def pset_or_create(model, product, pset_name):
-    return find_pset_instance(product, pset_name) or ifcopenshell.api.run(
-        "pset.add_pset", model, product=product, name=pset_name
-    )
+            pd = rel.RelatingPropertyDefinition
+            if pd.is_a("IfcPropertySet") and pd.Name == pset_name:
+                pset = pd
+                break
+    return pset or ifcopenshell.api.run("pset.add_pset", model, product=product, name=pset_name)
 
 
 def update_single_value(model, product, pset_name, prop, value):
@@ -109,7 +104,6 @@ def create_beneficiar(model, project, nume, is_org):
         actor = model.create_entity("IfcPerson", GivenName=given, FamilyName=family)
 
     role = model.create_entity("IfcActorRole", Role="OWNER")
-
     model.create_entity(
         "IfcRelAssignsToActor",
         GlobalId=guid.new(),
@@ -124,31 +118,29 @@ def create_beneficiar(model, project, nume, is_org):
 
 def stream_ifc_for_download(model, original_name: str):
     """
-    Write the IFC to a temp file on disk (no big RAM copy),
-    then expose it via st.download_button. The opened file handle
-    is passed directly, so Streamlit streams it in chunks.
+    Write IFC to a temp file on disk (no RAM copy),
+    stream that open file handle through download_button,
+    then delete the file immediately after.
     """
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ifc")
     tmp_path = Path(tmp.name)
-    tmp.close()  # we only needed the path
+    tmp.close()  # just needed the path
 
+    with st.spinner("Se scrie fișierul IFC…"):
+        model.write(str(tmp_path))
+
+    file_handle = tmp_path.open("rb")
+    st.download_button(
+        label="Descarcă IFC îmbunătățit",
+        data=file_handle,
+        file_name=f"{Path(original_name).stem}_imbunatatit.ifc",
+        mime="application/x-industry-foundation-classes",
+    )
+    file_handle.close()
     try:
-        with st.spinner("Se scrie fișierul IFC…"):
-            model.write(str(tmp_path))
-
-        # Open in binary read-mode **without** reading into memory
-        file_handle = tmp_path.open("rb")
-        st.download_button(
-            label="Descarcă IFC îmbunătățit",
-            data=file_handle,
-            file_name=f"{Path(original_name).stem}_imbunatatit.ifc",
-            mime="application/x-industry-foundation-classes",
-        )
-    finally:
-        # Clean up the temp file *after* the download is served.
-        # We can't delete right away (file is in use), so we
-        # register removal when Streamlit script ends.
-        st.session_state.setdefault("_files_to_delete", []).append(tmp_path)
+        tmp_path.unlink(missing_ok=True)
+    except Exception:
+        pass  # If removal fails (e.g. handle still locked), OS will clean up later
 
 
 # ---------------------------------------------------------------------------
@@ -173,19 +165,19 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
-    # ---------------- Project info ----------------
+    # ------------- Project info -----------------
     with st.expander("Informații proiect", expanded=True):
         project_name = st.text_input("Număr proiect", value=project.Name or "")
         project_long_name = st.text_input("Nume proiect", value=project.LongName or "")
 
-    # ---------------- Beneficiary -----------------
+    # ------------- Beneficiary ------------------
     with st.expander("Beneficiar", expanded=True):
         beneficiar_type = st.radio(
             "Tip beneficiar", ["Persoană fizică", "Persoană juridică"], horizontal=True
         )
         beneficiar_nume = st.text_input("Nume beneficiar")
 
-    # ---------------- Land registration ----------
+    # ------------- Land registration ------------
     with st.expander("Date teren (PSet_LandRegistration)", expanded=True):
         site_options = {
             i: f"{sites[i].Name or '(Sit fără nume)'} – {sites[i].GlobalId}"
@@ -207,25 +199,23 @@ if uploaded_file:
             value=get_single_value(site, "PSet_LandRegistration", "LandId"),
         )
 
-    # ---------------- Address ---------------------
+    # ------------- Address ----------------------
     with st.expander("Adresă teren (PSet_Address)", expanded=True):
         strada = st.text_input("Stradă", value=get_single_value(site, "PSet_Address", "Street"))
         oras = st.text_input("Oraș", value=get_single_value(site, "PSet_Address", "Town"))
 
-        default_judet_val_from_ifc = get_single_value(site, "PSet_Address", "Region")
+        default_region = get_single_value(site, "PSet_Address", "Region")
         try:
-            default_select_idx = ROM_COUNTIES_BASE.index(default_judet_val_from_ifc) + 1
+            default_idx = ROM_COUNTIES_BASE.index(default_region) + 1
         except ValueError:
-            default_select_idx = 0
+            default_idx = 0
 
-        judet_selection = st.selectbox("Județ", UI_ROM_COUNTIES, index=default_select_idx)
-        cod = st.text_input(
-            "Cod poștal", value=get_single_value(site, "PSet_Address", "PostalCode")
-        )
+        judet_selection = st.selectbox("Județ", UI_ROM_COUNTIES, index=default_idx)
+        cod = st.text_input("Cod poștal", value=get_single_value(site, "PSet_Address", "PostalCode"))
 
-    # ---------------- Apply / export --------------
+    # ------------- Apply / export ---------------
     if st.button("Aplică modificările și generează descărcarea"):
-        # ••• Write back to model •••
+        # Update project
         project.Name = project_name
         project.LongName = project_long_name
 
@@ -237,11 +227,10 @@ if uploaded_file:
         update_single_value(model, site, "PSet_LandRegistration", "LandTitleID", land_title_id)
         update_single_value(model, site, "PSet_LandRegistration", "LandId", land_id)
 
-        actual_judet = judet_selection if judet_selection != DEFAULT_JUDET_PROMPT else ""
         address_props = {
             "Street": strada,
             "Town": oras,
-            "Region": actual_judet,
+            "Region": judet_selection if judet_selection != DEFAULT_JUDET_PROMPT else "",
             "PostalCode": cod,
             "Country": "Romania",
         }
@@ -252,16 +241,3 @@ if uploaded_file:
             "Modificările au fost aplicate! Folosiți butonul de mai jos pentru a descărca fișierul IFC actualizat."
         )
         stream_ifc_for_download(model, uploaded_file.name)
-
-# ---------------------------------------------------------------------------
-# Session-end cleanup of temp files
-# ---------------------------------------------------------------------------
-def _cleanup_temp_files():
-    for p in st.session_state.get("_files_to_delete", []):
-        try:
-            p.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-# Register the cleanup so it runs when ScriptRunner shuts down
-st.on_session_end(_cleanup_temp_files)
