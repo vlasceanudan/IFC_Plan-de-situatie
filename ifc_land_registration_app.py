@@ -8,18 +8,6 @@ import io
 import os
 import base64
 
-# ---------------------------------------------------------------------------
-# 🇷🇴 Plan de situație IFC – Editor înregistrare teren (Streamlit)
-# ---------------------------------------------------------------------------
-# Rev‑10 (2025‑06‑07): Câmpul „Județ/Regiune” devine dropdown cu toate județele
-#     României (inclusiv București). Valoarea implicită se preîncarcă din
-#     PSet_Address dacă există. Adăugat placeholder pentru selecție județ.
-#     Corectat load_ifc_from_upload pentru memoryview.
-#     Corectat create_beneficiar: eliminat GlobalId pentru IfcOrganization/IfcPerson.
-
-#     Corectat exportul IFC pentru a folosi model.to_string() cu BytesIO.
-# ---------------------------------------------------------------------------
-
 
 st.set_page_config(page_title="Plan de situație IFC", layout="centered")
 
@@ -63,15 +51,17 @@ ROM_COUNTIES_BASE = [
 DEFAULT_JUDET_PROMPT = "--- Selectați județul ---"
 UI_ROM_COUNTIES = [DEFAULT_JUDET_PROMPT] + ROM_COUNTIES_BASE
 
+
 # ----------------------------------------------------------
 # Funcții helper
 # ----------------------------------------------------------
 
-def load_ifc_from_upload(uploaded_file_mv: memoryview):
+def load_ifc_from_upload(file_bytes: bytes):
+    """Load an IFC model from uploaded bytes."""
     tmp_file_path = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as temp_file:
-            temp_file.write(uploaded_file_mv)
+            temp_file.write(file_bytes)
             tmp_file_path = temp_file.name
         model = ifcopenshell.open(tmp_file_path)
         return model
@@ -138,7 +128,8 @@ st.title("Plan de situație IFC - Îmbogățire cu informații")
 uploaded_file = st.file_uploader("Încarcă un fișier IFC", type=["ifc"], accept_multiple_files=False)
 
 if uploaded_file:
-    model = load_ifc_from_upload(uploaded_file.getbuffer()) 
+    file_bytes = uploaded_file.getvalue()
+    model = load_ifc_from_upload(file_bytes)
     
     project = get_project(model)
     if project is None:
@@ -150,35 +141,135 @@ if uploaded_file:
         st.error("Nu s-a găsit niciun IfcSite în modelul încărcat.")
         st.stop()
 
-    b64_ifc = base64.b64encode(uploaded_file.getvalue()).decode()
+    b64_ifc = base64.b64encode(file_bytes).decode()
+    
+    # --- START: VIEWER CODE WITH CONSOLE LOGS ---
     viewer_html = f"""
-    <div id='viewer-container' style='width: 100%; height: 600px;'></div>
-    <script>
-        // Prevent libraries from thinking we run in Node and CommonJS
-        window.process = {{ versions: {{}} }};
-        window.module = {{}};
-    </script>
+    <div id='viewer-container' style='width: 100%; height: 600px; position: relative;'></div>
     <script type='module'>
-        import * as OBC from 'https://esm.sh/openbim-components@1.5.1?bundle';
+        console.log("Viewer script started.");
 
-        const components = new OBC.Components();
-        components.scene = new OBC.SimpleScene(components);
+        // Import the components library
+        import * as OBC from 'https://esm.sh/openbim-components';
+        console.log("OBC imported.");
+
         const container = document.getElementById('viewer-container');
-        components.renderer = new OBC.SimpleRenderer(components, container);
-        components.camera = new OBC.SimpleCamera(components);
-        await components.init();
-        await components.scene.setup();
+        if (!container) {{
+            console.error("Viewer container not found!");
+        }} else {{
+            console.log("Viewer container found.");
+            const components = new OBC.Components();
 
-        const ifcLoader = components.tools.get(OBC.FragmentIfcLoader);
-        ifcLoader.settings.wasm = {{ absolute: true, path: 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.68/' }};
-        await ifcLoader.setup();
+            // Configure the main components
+            components.scene = new OBC.SimpleScene(components);
+            components.renderer = new OBC.PostproductionRenderer(components, container);
+            components.camera = new OBC.SimpleCamera(components);
+            components.raycaster = new OBC.SimpleRaycaster(components);
+            console.log("OBC components configured.");
 
-        const base64Data = '{b64_ifc}';
-        const ifcBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-        const model = await ifcLoader.load(ifcBytes);
-        components.scene.get().add(model);
+            // Initialize the components
+            components.init().then(async () => {{
+                console.log("OBC components initialized.");
+
+                // Set the scene for the renderer and setup lighting
+                components.renderer.setBackdrop(OBC.BackdropColor.Light);
+                await components.scene.setup();
+                console.log("Scene setup complete.");
+
+                // Add a grid for better spatial context
+                try {{
+                    new OBC.SimpleGrid(components, {{ size: 100 }});
+                    console.log("Grid added.");
+                }} catch (e) {{
+                     console.warn("Could not add grid:", e); // Grid might fail on older versions or specific setups
+                }}
+
+
+                // Create a main toolbar for UI elements
+                const mainToolbar = new OBC.Toolbar(components, {{
+                    name: "Main Toolbar",
+                    position: "bottom",
+                }});
+                components.ui.add(mainToolbar);
+                console.log("Toolbar added.");
+
+                // Add camera controls (zoom, pan, orbit, fit-to-sphere) to the toolbar
+                const cameraControls = new OBC.CameraControls(components);
+                mainToolbar.addChild(cameraControls);
+                console.log("Camera controls added.");
+
+
+                // Set up the IFC importer
+                const importer = new OBC.IfcImporter(components);
+                console.log("IFC Importer created.");
+
+                // Configure the path to the web-ifc WASM module
+                importer.settings.wasm = {{
+                    path: "https://unpkg.com/web-ifc@0.0.55/",
+                    absolute: true,
+                }};
+                console.log("IFC Importer WASM path configured.");
+
+                // Get the base64 encoded IFC data from Python
+                const base64Data = '{b64_ifc}';
+                console.log("Base64 data obtained.");
+                console.log("IFC base64 size:", base64Data.length);
+
+
+                // Load the model
+                try {{
+                    console.log("Attempting to load model...");
+                    const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                    console.log("Buffer created, size:", buffer.byteLength);
+                    const model = await importer.load(buffer);
+                    console.log("Model loaded:", model);
+                    
+                    if (model) {{
+                        components.scene.add(model);
+                        console.log("Model added to scene.");
+
+                        // Fit camera to the model after a short delay to ensure rendering is ready
+                        console.log("Attempting to fit camera...");
+                        setTimeout(() => {{
+                            try {{
+                                cameraControls.fitToSphere(model, true);
+                                console.log("Camera fitted to model.");
+                            }} catch (e) {{
+                                console.error("Error fitting camera:", e);
+                            }}
+                        }}, 500); // Increased timeout slightly
+
+                    }} else {{
+                        console.warn("Importer.load did not return a valid model.");
+                         const messageElement = document.createElement('p');
+                         messageElement.textContent = `Avertisment: Modelul IFC nu a putut fi încărcat corect sau nu conține geometrie vizibilă.`;
+                         messageElement.style.color = 'orange';
+                         messageElement.style.padding = '20px';
+                         container.appendChild(messageElement);
+                    }}
+
+
+                }} catch (error) {{
+                    console.error("Error loading IFC model:", error);
+                    const errorElement = document.createElement('p');
+                    errorElement.textContent = `A apărut o eroare la încărcarea modelului 3D: ${{error.message}}`;
+                    errorElement.style.color = 'red';
+                    errorElement.style.padding = '20px';
+                    container.appendChild(errorElement);
+                }}
+            }}).catch(initError => {{
+                 console.error("Error during OBC components initialization:", initError);
+                 const errorElement = document.createElement('p');
+                 errorElement.textContent = `A apărut o eroare la inițializarea vizualizatorului 3D: ${{initError.message}}`;
+                 errorElement.style.color = 'red';
+                 errorElement.style.padding = '20px';
+                 container.appendChild(errorElement);
+            }});
+        }}
     </script>
     """
+    # --- END: VIEWER CODE WITH CONSOLE LOGS ---
+    
     st.components.v1.html(viewer_html, height=600)
 
     with st.expander("Informații proiect", expanded=True):
@@ -224,7 +315,22 @@ if uploaded_file:
         project.LongName = project_long_name
 
         if beneficiar_nume.strip():
-            create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type == "Persoană juridică"))
+            # Check if a beneficiary relationship already exists for the project with the "OWNER" role
+            existing_beneficiary = None
+            for rel in getattr(project, 'HasAssignments', []):
+                 if rel.is_a('IfcRelAssignsToActor'):
+                      if rel.ActingRole and rel.ActingRole.Role == 'OWNER':
+                           existing_beneficiary = rel.RelatingActor
+                           break # Found existing owner
+
+            # Only create a new beneficiary if none exists or if the name/type is different
+            # Note: This simple check doesn't handle multiple owners or changing an existing one's name/type easily.
+            # For simplicity here, we'll just add if none exists with OWNER role.
+            if not existing_beneficiary:
+                 create_beneficiar(model, project, beneficiar_nume.strip(), is_org=(beneficiar_type == "Persoană juridică"))
+            else:
+                 st.warning("Un beneficiar (OWNER) există deja pentru proiect și nu va fi creat altul.")
+
 
         update_single_value(model, site, "PSet_LandRegistration", "LandTitleID", land_title_id)
         update_single_value(model, site, "PSet_LandRegistration", "LandId", land_id)
@@ -240,32 +346,29 @@ if uploaded_file:
         }
         
         # Actualizăm proprietățile de adresă
-        # PSet-ul va fi creat de update_single_value dacă nu există
-        for prop_name, prop_value in address_props.items():
-            # Setăm proprietatea doar dacă are valoare sau este "Country"
-            # sau dacă PSet-ul există deja și vrem să ștergem valoarea (setând-o la "")
-            # Logica actuală: dacă prop_value e gol (ex. "" din UI), va fi setat ca "" în IFC
-            if prop_value or prop_name == "Country":
-                 update_single_value(model, site, "PSet_Address", prop_name, prop_value.strip())
-            elif get_single_value(site, "PSet_Address", prop_name): # Dacă există valoare în IFC dar nu în UI (e goală)
-                 update_single_value(model, site, "PSet_Address", prop_name, "") # O setăm la gol
+        address_pset = pset_or_create(model, site, "PSet_Address")
+        # Set properties, using .strip() to remove leading/trailing whitespace
+        # Empty strings from UI will result in unset properties in IFC, which is standard.
+        ifcopenshell.api.run(
+            "pset.edit_pset", 
+            model, 
+            pset=address_pset, 
+            properties={k: v.strip() for k, v in address_props.items()}
+        )
 
 
-        # --- Corectat aici ---
         # Export IFC
-        # Obține conținutul IFC ca string, apoi codifică-l în bytes
+        # Get the IFC content as a string, then encode it to bytes
         ifc_string_content = model.to_string()
         ifc_bytes_content = ifc_string_content.encode("utf-8")
         
-        # Creează un obiect BytesIO din conținutul byte
+        # Create a BytesIO object from the byte content
         file_data = io.BytesIO(ifc_bytes_content)
-        # file_data.seek(0) # Nu este necesar aici deoarece BytesIO este inițializat direct cu conținutul
-        # --- Sfârșit corecție ---
 
         st.success("Modificările au fost aplicate! Folosiți butonul de mai jos pentru a descărca fișierul IFC actualizat.")
         st.download_button(
             label="Descarcă IFC îmbogățit",
-            data=file_data, # Acum file_data este un BytesIO care conține datele fișierului
-            file_name=f"+{uploaded_file.name if uploaded_file else 'model'}",
+            data=file_data,
+            file_name=f"modificat_{uploaded_file.name if uploaded_file else 'model.ifc'}",
             mime="application/x-industry-foundation-classes",
         )
